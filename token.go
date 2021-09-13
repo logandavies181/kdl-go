@@ -11,4 +11,7 @@ const (
 
 	// Literals
 	IDENT // main
+
+	VALUE
+	ATTRIBUTE
 )

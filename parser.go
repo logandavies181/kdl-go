@@ -5,7 +5,8 @@ import (
 )
 
 type Node struct {
-	Children []Node
+	Id   string
+	Attr string
 }
 
 // Parser represents a parser.
@@ -23,9 +24,17 @@ func NewParser(r io.Reader) *Parser {
 	return &Parser{s: NewScanner(r)}
 }
 
-// Parse parses a SQL SELECT statement.
+// Parse parses a KDL document
 func (p *Parser) Parse() (*Node, error) {
-	return nil, nil
+	n := new(Node)
+
+	_, lit := p.scanIgnoreWhitespace()
+	n.Id = lit
+
+	_, lit = p.scanIgnoreWhitespace()
+	n.Attr = lit
+
+	return n, nil
 }
 
 // scan returns the next token from the underlying scanner.
@@ -48,6 +57,10 @@ func (p *Parser) scan() (tok Token, lit string) {
 
 // scanIgnoreWhitespace scans the next non-whitespace token.
 func (p *Parser) scanIgnoreWhitespace() (tok Token, lit string) {
+	tok, lit = p.scan()
+	if tok == WS {
+		tok, lit = p.scan()
+	}
 	return
 }
 

@@ -24,12 +24,12 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	// If we see whitespace then consume all contiguous whitespace.
 	// If we see a letter then consume as an ident or reserved word.
 	// If we see a digit then consume as a number.
-	if isWhitespace(ch) {
+	if isWhitespace(ch) || isNewline(ch) {
 		s.unread()
 		return s.scanWhitespace()
 	} else if isLetter(ch) {
 		s.unread()
-		return s.scanIdent()
+		return s.scanWord()
 	}
 
 	// Otherwise read the individual character.
@@ -42,6 +42,7 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 }
 
 // scanWhitespace consumes the current rune and all contiguous whitespace.
+// TODO update to split between ws and newlines
 func (s *Scanner) scanWhitespace() (tok Token, lit string) {
 	// Create a buffer and read the current character into it.
 	var buf bytes.Buffer
@@ -52,7 +53,7 @@ func (s *Scanner) scanWhitespace() (tok Token, lit string) {
 	for {
 		if ch := s.read(); ch == _EOF {
 			break
-		} else if !isWhitespace(ch) {
+		} else if !isWhitespace(ch) || !isNewline(ch) {
 			s.unread()
 			break
 		} else {
@@ -63,8 +64,9 @@ func (s *Scanner) scanWhitespace() (tok Token, lit string) {
 	return WS, buf.String()
 }
 
-// scanIdent consumes the current rune and all contiguous ident runes.
-func (s *Scanner) scanIdent() (tok Token, lit string) {
+// scanWord consumes the current rune and all contiguous non-whitespace chars.
+// TODO allow like, most of unicode
+func (s *Scanner) scanWord() (tok Token, lit string) {
 	// Create a buffer and read the current character into it.
 	var buf bytes.Buffer
 	buf.WriteRune(s.read())
@@ -74,16 +76,20 @@ func (s *Scanner) scanIdent() (tok Token, lit string) {
 	for {
 		if ch := s.read(); ch == _EOF {
 			break
-		} else if !isLetter(ch) && !isDigit(ch) && ch != '_' {
+		} else if ch == '=' {
+			// found attribute. now scan for value
+			_, value := s.scanValue()
+			return ATTRIBUTE, buf.String()+"="+value
+		} else if !isLetter(ch) && !isDigit(ch) {
 			s.unread()
 			break
 		} else {
+			// TODO: handle error
 			_, _ = buf.WriteRune(ch)
 		}
 	}
 
-	// If the string matches a special syntax then do something
-	// TODO
+	// TODO: match keywords
 
 	// Otherwise return as a regular identifier.
 	return IDENT, buf.String()
@@ -101,6 +107,39 @@ func (s *Scanner) read() rune {
 
 // unread places the previously read rune back on the reader.
 func (s *Scanner) unread() { _ = s.r.UnreadRune() }
+
+// scanValue
+func (s *Scanner) scanValue() (tok Token, lit string) {
+	// Create a buffer and read the current character into it.
+	var buf bytes.Buffer
+	buf.WriteRune(s.read())
+
+	numQuotes := 0
+	for {
+		if ch := s.read(); ch == _EOF {
+			break
+		} else if ch == '"' {
+			// TODO: handle escapes
+			// TODO s.scanString()
+			if numQuotes < 2 {
+				numQuotes++
+			}  else {
+				break
+			}
+		} else if !isLetter(ch) && !isDigit(ch) {
+			s.unread()
+			break
+		} else {
+			// TODO: handle error
+			_, _ = buf.WriteRune(ch)
+		}
+	}
+
+	// TODO: match keywords
+
+	// Otherwise return as a regular identifier.
+	return VALUE, buf.String()
+}
 
 // isWhitespace returns true if the rune is a space, tab, or newline.
 func isWhitespace(ch rune) bool {
