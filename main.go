@@ -6,7 +6,7 @@ import (
 )
 
 var test = `
-foo bar=r"baz ah"
+foo bar=r"baz ah" true false null 1 (foobar)"baz"
 `
 
 func main() {

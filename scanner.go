@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"bytes"
+	"fmt"
 	"io"
 )
 
@@ -29,6 +30,10 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	switch {
 	case ch == _EOF:
 		return EOF, ""
+	case ch == ';':
+		return SEMICOLON, ";"
+	case isNewline(ch):
+		return NEWLINE, string(ch)
 	case ch == 'r':
 		// check for raw string
 		if ch2 := s.read(); ch2 == _EOF {
@@ -44,6 +49,20 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 	case ch == '"':
 		s.unread()
 		return s.scanEscapedString()
+	case ch == '(':
+		s.unread()
+		return s.scanType()
+	case ch == '/':
+		// check for comment
+		ch2 := s.read()
+		if ch2 == '-' {
+			return s.scanSlashDashComment()
+		} else if ch2 == '/' {
+			return s.scanSingleLineComment()
+		} else if ch2 == '*' {
+			return s.scanMultiLineComment()
+		}
+
 	case isSign(ch):
 		// check if identifier or number
 		ch2 := s.read()
@@ -59,6 +78,11 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 
 			return IDENTIFIER, string(ch)+idStr
 		}
+	case isDigit(ch):
+		s.unread()
+		_, numberStr := s.scanNumber()
+		return VALUE, numberStr
+
 	case isWhitespace(ch):
 		s.unread()
 		return s.scanWhitespace()
@@ -103,13 +127,9 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 }
 
 // scanWhitespace consumes the current rune and all contiguous whitespace.
-// TODO update to split between ws and newlines
 func (s *Scanner) scanWhitespace() (tok Token, lit string) {
-	// Create a buffer and read the current character into it.
 	var buf bytes.Buffer
 
-	// Read every subsequent whitespace character into the buffer.
-	// Non-whitespace characters and EOF will cause the loop to exit.
 	for {
 		if ch := s.read(); ch == _EOF {
 			break
@@ -196,7 +216,7 @@ func (s *Scanner) scanRawString() (tok Token, lit string) {
 	var buf bytes.Buffer
 
 	if ch := s.read(); ch == _EOF {
-		panic("RawString attempted to read but starts with wrong char")
+		return ILLEGAL, buf.String()
 	} else if ch == 'r' {
 		buf.WriteRune(ch)
 	}
@@ -207,7 +227,7 @@ func (s *Scanner) scanRawString() (tok Token, lit string) {
 		delimiter = ch
 		buf.WriteRune(ch)
 	default:
-		panic("RawString attempted to read but second char is wrong char")
+		return ILLEGAL, buf.String()
 	}
 
 	// Scan over the raw string
@@ -239,14 +259,14 @@ func (s *Scanner) scanType() (tok Token, lit string) {
 	_, identifier := s.scanIdentifier()
 
 	switch ch := s.read(); ch {
-	case _EOF:
-		return ILLEGAL, buf.String()
 	case ')':
 		buf.WriteString(identifier)
 		buf.WriteRune(ch)
 	default:
 		return ILLEGAL, buf.String()
 	}
+
+	fmt.Println("read", buf.String())
 
 	return TYPE, buf.String()
 }
@@ -257,14 +277,12 @@ func (s *Scanner) scanIdentifier() (tok Token, lit string) {
 
 	for {
 		ch := s.read()
-		switch {
-		case isIdentifierChar(ch):
+		if isIdentifierChar(ch) {
 			buf.WriteRune(ch)
-		case isWhitespace(ch):
+		} else {
+			// Just return here and let the caller determine if what's next is valid
 			s.unread()
 			break
-		default:
-			return ILLEGAL, buf.String()
 		}
 	}
 
@@ -274,5 +292,46 @@ func (s *Scanner) scanIdentifier() (tok Token, lit string) {
 func (s *Scanner) scanNumber() (tok Token, lit string) {
 	var buf bytes.Buffer
 
-	return ILLEGAL, buf.String()
+	for {
+		ch := s.read()
+		if isDigit(ch) {
+			buf.WriteRune(ch)
+		} else if isWhitespace(ch) {
+			s.unread()
+			break
+		} else {
+			return ILLEGAL, buf.String()
+		}
+	}
+
+	return NUMBER, buf.String()
+}
+
+func (s *Scanner) scanSlashDashComment() (tok Token, lit string) {
+	return 0, ""
+}
+func (s *Scanner) scanSingleLineComment() (tok Token, lit string) {
+	for {
+		ch := s.read()
+		if isNewline(ch) || ch == _EOF {
+			break
+		}
+	}
+
+	return SINGLE_LINE_COMMENT, ""
+}
+func (s *Scanner) scanMultiLineComment() (tok Token, lit string) {
+	for  {
+		ch := s.read()
+		if ch == _EOF {
+			break
+		} else if ch == '*' {
+			ch2 := s.read()
+			if ch2 == '/' {
+				break
+			}
+		}
+	}
+
+	return MULTI_LINE_COMMENT, ""
 }
