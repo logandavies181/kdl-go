@@ -9,6 +9,11 @@ type Node struct {
 	Attr string
 }
 
+type Item struct {
+	Tok Token
+	Lit string
+}
+
 // Parser represents a parser.
 type Parser struct {
 	s   *Scanner
@@ -25,14 +30,16 @@ func NewParser(r io.Reader) *Parser {
 }
 
 // Parse parses a KDL document
-func (p *Parser) Parse() (*Node, error) {
-	n := new(Node)
+func (p *Parser) Parse() ([]Item, error) {
+	var n []Item
 
-	_, lit := p.scanIgnoreWhitespace()
-	n.Id = lit
-
-	_, lit = p.scanIgnoreWhitespace()
-	n.Attr = lit
+	for {
+		tok, lit := p.scanIgnoreWhitespace()
+		if tok == EOF {
+			break
+		}
+		n = append(n, Item{Tok: tok, Lit: lit})
+	}
 
 	return n, nil
 }

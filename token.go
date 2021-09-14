@@ -9,9 +9,12 @@ const (
 	EOF
 	WS
 
-	// Literals
-	IDENT // main
-
+	IDENTIFIER
+	KEYWORD
+	PROPERTY
 	VALUE
-	ATTRIBUTE
+	TYPE
+
+	ESCAPED_STRING
+	RAW_STRING
 )

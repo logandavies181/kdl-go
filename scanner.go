@@ -16,29 +16,90 @@ func NewScanner(r io.Reader) *Scanner {
 	return &Scanner{r: bufio.NewReader(r)}
 }
 
-// Scan returns the next token and literal value.
-func (s *Scanner) Scan() (tok Token, lit string) {
-	// Read the next rune.
-	ch := s.read()
 
-	// If we see whitespace then consume all contiguous whitespace.
-	// If we see a letter then consume as an ident or reserved word.
-	// If we see a digit then consume as a number.
-	if isWhitespace(ch) || isNewline(ch) {
+// Scan returns the next token and literal value; determining its type down to Identifier, Keyword, Property, Value or
+// Type.
+func (s *Scanner) Scan() (tok Token, lit string) {
+	var buf bytes.Buffer
+
+	//
+	// check first char
+	//
+	ch := s.read()
+	switch {
+	case ch == _EOF:
+		return EOF, ""
+	case ch == 'r':
+		// check for raw string
+		if ch2 := s.read(); ch2 == _EOF {
+			return IDENTIFIER, "r"
+		} else if ch2 == '#' || ch2 == '"' {
+			s.unread()
+			s.unread()
+			return s.scanRawString()
+		} else {
+			s.unread()
+			buf.WriteRune('r')
+		}
+	case ch == '"':
+		s.unread()
+		return s.scanEscapedString()
+	case isSign(ch):
+		// check if identifier or number
+		ch2 := s.read()
+		switch {
+		case isDigit(ch2):
+			s.unread()
+			_, numberStr := s.scanNumber()
+
+			return VALUE, string(ch)+numberStr
+		case isIdentifierChar(ch2):
+			s.unread()
+			_, idStr := s.scanIdentifier()
+
+			return IDENTIFIER, string(ch)+idStr
+		}
+	case isWhitespace(ch):
 		s.unread()
 		return s.scanWhitespace()
-	} else if isLetter(ch) {
+
+	case !isIdentifierChar(ch):
+		// check if this case makes any sense
+
+		// Not a valid identifier
 		s.unread()
-		return s.scanWord()
+		return ILLEGAL, buf.String()
+	default:
+		_, _ = buf.WriteRune(ch)
 	}
 
-	// Otherwise read the individual character.
-	switch ch {
-	case _EOF:
-		return EOF, ""
+	//
+	// check the rest of the chars
+	//
+	for {
+		if ch := s.read(); ch == _EOF {
+			break
+		} else if ch == '=' {
+			// found property. now scan for value
+			_, value := s.scanValue()
+			return PROPERTY, buf.String() + "=" + value
+		} else if !isIdentifierChar(ch) {
+			// TODO
+			// should check for semicolon and stuff here
+			s.unread()
+			break
+		} else {
+			_, _ = buf.WriteRune(ch)
+		}
 	}
 
-	return ILLEGAL, string(ch)
+	identifier := buf.String()
+	if identifier == "true" || identifier == "false" || identifier == "null" {
+		return KEYWORD, identifier
+	}
+
+	// Otherwise return as a regular identifier.
+	return IDENTIFIER, identifier
 }
 
 // scanWhitespace consumes the current rune and all contiguous whitespace.
@@ -46,14 +107,13 @@ func (s *Scanner) Scan() (tok Token, lit string) {
 func (s *Scanner) scanWhitespace() (tok Token, lit string) {
 	// Create a buffer and read the current character into it.
 	var buf bytes.Buffer
-	buf.WriteRune(s.read())
 
 	// Read every subsequent whitespace character into the buffer.
 	// Non-whitespace characters and EOF will cause the loop to exit.
 	for {
 		if ch := s.read(); ch == _EOF {
 			break
-		} else if !isWhitespace(ch) || !isNewline(ch) {
+		} else if !isWhitespace(ch) {
 			s.unread()
 			break
 		} else {
@@ -64,41 +124,11 @@ func (s *Scanner) scanWhitespace() (tok Token, lit string) {
 	return WS, buf.String()
 }
 
-// scanWord consumes the current rune and all contiguous non-whitespace chars.
-// TODO allow like, most of unicode
-func (s *Scanner) scanWord() (tok Token, lit string) {
-	// Create a buffer and read the current character into it.
-	var buf bytes.Buffer
-	buf.WriteRune(s.read())
-
-	// Read every subsequent ident character into the buffer.
-	// Non-ident characters and EOF will cause the loop to exit.
-	for {
-		if ch := s.read(); ch == _EOF {
-			break
-		} else if ch == '=' {
-			// found attribute. now scan for value
-			_, value := s.scanValue()
-			return ATTRIBUTE, buf.String()+"="+value
-		} else if !isLetter(ch) && !isDigit(ch) {
-			s.unread()
-			break
-		} else {
-			// TODO: handle error
-			_, _ = buf.WriteRune(ch)
-		}
-	}
-
-	// TODO: match keywords
-
-	// Otherwise return as a regular identifier.
-	return IDENT, buf.String()
-}
-
 // read reads the next rune from the buffered reader.
 // Returns the rune(0) if an error occurs (or io.EOF is returned).
 func (s *Scanner) read() rune {
 	ch, _, err := s.r.ReadRune()
+	// TODO: check err type
 	if err != nil {
 		return _EOF
 	}
@@ -112,26 +142,24 @@ func (s *Scanner) unread() { _ = s.r.UnreadRune() }
 func (s *Scanner) scanValue() (tok Token, lit string) {
 	// Create a buffer and read the current character into it.
 	var buf bytes.Buffer
-	buf.WriteRune(s.read())
 
-	numQuotes := 0
 	for {
 		if ch := s.read(); ch == _EOF {
 			break
 		} else if ch == '"' {
-			// TODO: handle escapes
-			// TODO s.scanString()
-			if numQuotes < 2 {
-				numQuotes++
-			}  else {
-				break
-			}
+			s.unread()
+			_, str := s.scanEscapedString()
+			buf.WriteString(str)
+			break
 		} else if !isLetter(ch) && !isDigit(ch) {
 			s.unread()
 			break
 		} else {
 			// TODO: handle error
-			_, _ = buf.WriteRune(ch)
+			_, err := buf.WriteRune(ch)
+			if err != nil {
+				panic(err)
+			}
 		}
 	}
 
@@ -141,52 +169,110 @@ func (s *Scanner) scanValue() (tok Token, lit string) {
 	return VALUE, buf.String()
 }
 
-// isWhitespace returns true if the rune is a space, tab, or newline.
-func isWhitespace(ch rune) bool {
-	switch ch {
-	case 0x0009,
-		0x0020,
-		0x00A0,
-		0x1680,
-		0x2000,
-		0x2001,
-		0x2002,
-		0x2003,
-		0x2004,
-		0x2005,
-		0x2006,
-		0x2007,
-		0x2008,
-		0x2009,
-		0x200A,
-		0x202F,
-		0x205F,
-		0x3000:
-		return true
-	default:
-		return false
+func (s *Scanner) scanEscapedString() (tok Token, lit string) {
+	// Create a buffer and read the current character into it.
+	var buf bytes.Buffer
+	buf.WriteRune(s.read())
+
+	// TODO: handle escapes, and invalid chars
+	for {
+		if ch := s.read(); ch == _EOF {
+			break
+		} else if ch == '"' {
+			// TODO: handle error
+			buf.WriteRune(ch)
+
+			break
+		} else {
+			// TODO: handle error
+			buf.WriteRune(ch)
+		}
 	}
+
+	return ESCAPED_STRING, buf.String()
 }
 
-func isNewline(ch rune) bool {
-	switch ch {
-	case 0x000D,    // CR
-		0x000A, // LF
-		0x0085, // NEL
-		0x000C, // FF
-		0x2028, // FF
-		0x2029: // PS
-		return true
-	default:
-		return false
+func (s *Scanner) scanRawString() (tok Token, lit string) {
+	var buf bytes.Buffer
+
+	if ch := s.read(); ch == _EOF {
+		panic("RawString attempted to read but starts with wrong char")
+	} else if ch == 'r' {
+		buf.WriteRune(ch)
 	}
+
+	var delimiter rune
+	switch ch := s.read(); ch {
+	case '#', '"':
+		delimiter = ch
+		buf.WriteRune(ch)
+	default:
+		panic("RawString attempted to read but second char is wrong char")
+	}
+
+	// Scan over the raw string
+	for {
+		if ch := s.read(); ch == _EOF {
+			break
+		} else if ch == delimiter {
+			buf.WriteRune(ch)
+
+			break
+		} else {
+			// TODO: handle error
+			buf.WriteRune(ch)
+		}
+	}
+
+	return RAW_STRING, buf.String()
 }
 
-// isLetter returns true if the rune is a letter.
-func isLetter(ch rune) bool { return (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') }
+func (s *Scanner) scanType() (tok Token, lit string) {
+	var buf bytes.Buffer
 
-// isDigit returns true if the rune is a digit.
-func isDigit(ch rune) bool { return (ch >= '0' && ch <= '9') }
+	if ch := s.read(); ch == '(' {
+		buf.WriteRune(ch)
+	} else {
+		return ILLEGAL, buf.String()
+	}
 
-// eof represents a marker rune for the end of the reader.
-var _EOF = rune(0)
+	_, identifier := s.scanIdentifier()
+
+	switch ch := s.read(); ch {
+	case _EOF:
+		return ILLEGAL, buf.String()
+	case ')':
+		buf.WriteString(identifier)
+		buf.WriteRune(ch)
+	default:
+		return ILLEGAL, buf.String()
+	}
+
+	return TYPE, buf.String()
+}
+
+// assumes that the start of the string has been checked for type and reads the rest of the identifier
+func (s *Scanner) scanIdentifier() (tok Token, lit string) {
+	var buf bytes.Buffer
+
+	for {
+		ch := s.read()
+		switch {
+		case isIdentifierChar(ch):
+			buf.WriteRune(ch)
+		case isWhitespace(ch):
+			s.unread()
+			break
+		default:
+			return ILLEGAL, buf.String()
+		}
+	}
+
+	return IDENTIFIER, buf.String()
+}
+
+func (s *Scanner) scanNumber() (tok Token, lit string) {
+	var buf bytes.Buffer
+
+	return ILLEGAL, buf.String()
+}

@@ -6,7 +6,7 @@ import (
 )
 
 var test = `
-foo bar="baz"
+foo bar=r"baz ah"
 `
 
 func main() {
@@ -18,7 +18,7 @@ func main() {
 		fmt.Println("Error:", err)
 	}
 
-	if n != nil {
-		fmt.Println(n.Id, n.Attr)
+	for _, m := range n {
+		fmt.Println(m.Tok, m.Lit)
 	}
 }
